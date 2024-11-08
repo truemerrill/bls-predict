@@ -53,8 +53,7 @@ def ridge_regression(
         alpha (float): Regularization parameter.  Setting alpha to zero turns
             off regularization.
         weights (Array, optional): Optional sample weights of shape
-            (n_samples,). The weights do not need to be normalized.  Defaults
-            to None.
+            (N,). The weights do not need to be normalized.  Defaults to None.
         inverse (Literal["inverse", "pseudoinverse"], optional): Method for
             matrix inversion, either "inverse" or "pseudoinverse". Defaults to
             "inverse".
@@ -111,14 +110,17 @@ class BLSResult:
             the difference between X and A @ Y.T).
         delta_error (float): Relative change in residual error during the
             last iteration.
+        alpha (float): Final value of the regularization parameter.
         converged (bool): Whether the algorithm converged before reaching
             the maximum number of iteration
     """
+
     A: Array
     Y: Array
     n_iter: int
     residual_error: float
     delta_error: float
+    alpha: float
     converged: bool
 
 
@@ -126,7 +128,7 @@ def bilinear_least_squares(
     X: Array,
     rank: int,
     alpha: float = 0.0,
-    alpha_scale_factor: float = 0.9,
+    alpha_scale_factor: float = 1.0,
     alpha_threshold: float = 1e4,
     weights: Array | None = None,
     inverse: Literal["inverse", "pseudoinverse"] = "inverse",
@@ -154,7 +156,7 @@ def bilinear_least_squares(
         alpha_scale_factor (float, optional): Factor used to rescale the
             regularization parameter after each iteration. A scale factor less
             than one will lower the regularization parameter. The parameter is
-            not rescaled if the system is ill-conditioned. Defaults to 0.9.
+            not rescaled if the system is ill-conditioned. Defaults to 1.0.
         alpha_threshold (float, optional): Threshold for an ill-conditioned
             system.  If the condition number of the ridge matrix is larger than
             alpha_threshold, then the regularization parameter will not be
@@ -204,13 +206,20 @@ def bilinear_least_squares(
             mean_condition_number += c / F
 
         for n in range(N):
-            A[n, :], c = ridge_regression(
-                Y, X[n, :], alpha, weights=weights, inverse=inverse
-            )
+            # Note:
+            #   Since this regression occurs over a constant sample slice, all
+            #   of these points have the same weight.  So we can ignore the
+            #   weighting during this step.
+
+            A[n, :], c = ridge_regression(Y, X[n, :], alpha, inverse=inverse)
             mean_condition_number += c / N
 
         residual_error = float(np.linalg.norm(X - A @ Y.T, "fro"))
-        delta_error = abs(residual_error - residual_error_old) / residual_error_old
+        delta_error = (
+            abs(residual_error - residual_error_old) / residual_error_old
+            if residual_error_old != 0
+            else abs(residual_error - residual_error_old)
+        )
 
         if delta_error < rtol:
             converged = True
@@ -221,4 +230,4 @@ def bilinear_least_squares(
     else:
         converged = False
 
-    return BLSResult(A, Y, n_iter, residual_error, delta_error, converged)
+    return BLSResult(A, Y, n_iter, residual_error, delta_error, alpha, converged)
