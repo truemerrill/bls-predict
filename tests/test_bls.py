@@ -101,7 +101,7 @@ def test_regularization_effect():
 def test_weights_functionality():
     """Test the functionality of sample weights."""
     X = np.random.rand(10, 5)
-    weights = np.random.rand(10)
+    weights = np.random.rand(10, 5)
     result = bilinear_least_squares(X, rank=2, weights=weights)
     assert result.converged
 
@@ -127,9 +127,9 @@ def test_invalid_rank():
 def test_invalid_weights_length():
     """Test handling of invalid weights length."""
     X = np.random.rand(5, 5)
-    weights = np.random.rand(4)  # Incorrect length
+    weights = np.random.rand(4, 5)  # Incorrect length
     with pytest.raises(
-        ValueError, match="Number of weights must match the number of samples N."
+        ValueError, match="Weights must have the same shape as X."
     ):
         bilinear_least_squares(X, rank=2, weights=weights)
 

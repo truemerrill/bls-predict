@@ -161,7 +161,7 @@ def bilinear_least_squares(
             system.  If the condition number of the ridge matrix is larger than
             alpha_threshold, then the regularization parameter will not be
             scaled.  Defaults to 1e4.
-        weights (Array, optional): Optional sample weights of shape (N,). The
+        weights (Array, optional): Optional sample weights of shape (N, F). The
             weights do not need to be normalized. Defaults to None.
         max_iter (int, optional): Maximum number of iterations for the
             alternating least squares algorithm. Defaults to 500.
@@ -187,8 +187,8 @@ def bilinear_least_squares(
         )
 
     if weights is not None:
-        if len(weights) != N:
-            raise ValueError("Number of weights must match the number of samples N.")
+        if weights.shape != (N, F):
+            raise ValueError("Weights must have the same shape as X.")
 
     # SVD-based initialization
     U, S, Vt = np.linalg.svd(X, full_matrices=False)
@@ -200,18 +200,13 @@ def bilinear_least_squares(
         residual_error_old = residual_error
         mean_condition_number = 0.0
         for f in range(F):
-            Y[f, :], c = ridge_regression(
-                A, X[:, f], alpha, weights=weights, inverse=inverse
-            )
+            w = weights[:, f] if weights is not None else None
+            Y[f, :], c = ridge_regression(A, X[:, f], alpha, weights=w, inverse=inverse)
             mean_condition_number += c / F
 
         for n in range(N):
-            # Note:
-            #   Since this regression occurs over a constant sample slice, all
-            #   of these points have the same weight.  So we can ignore the
-            #   weighting during this step.
-
-            A[n, :], c = ridge_regression(Y, X[n, :], alpha, inverse=inverse)
+            w = weights[n, :] if weights is not None else None
+            A[n, :], c = ridge_regression(Y, X[n, :], alpha, weights=w, inverse=inverse)
             mean_condition_number += c / N
 
         residual_error = float(np.linalg.norm(X - A @ Y.T, "fro"))
