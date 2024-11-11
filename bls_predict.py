@@ -21,7 +21,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
-from typing import Literal
+from typing import Callable, Literal
 from dataclasses import dataclass
 
 import numpy as np
@@ -103,8 +103,8 @@ class BLSResult:
           latent factors.
 
     Attributes:
-        A (Array): Factor matrix of shape (N, R).
-        Y (Array): Factor matrix of shape (F, R).
+        A (Array): Coefficient matrix of shape (F, R).
+        Y (Array): Latent variable matrix of shape (N, R).
         n_iter (int): Number of iterations performed.
         residual_error (float): Final residual error (Frobenius norm of
             the difference between X and A @ Y.T).
@@ -123,6 +123,21 @@ class BLSResult:
     alpha: float
     converged: bool
 
+    def normalize(self):
+        """Normalize the coefficient and latent variable matrices.
+
+        Note:
+            The latent variable matrix is normalized when the L2 norm of
+            each of its columns is one.  The coefficient matrix is scaled
+            so that the matrix product A @ Y.T is unchanged.
+        """
+        N, R = self.Y.shape
+        for r in range(R):
+            norm = np.linalg.norm(self.Y[:, r]) * np.sign(np.mean(self.Y[:, r]))
+            self.Y[:, r] = self.Y[:, r] / norm
+            self.A[:, r] = self.A[:, r] * norm
+        
+
 
 def bilinear_least_squares(
     X: Array,
@@ -131,16 +146,33 @@ def bilinear_least_squares(
     alpha_scale_factor: float = 1.0,
     alpha_threshold: float = 1e4,
     weights: Array | None = None,
+    coefficient_constraint: Callable[[Array], Array] | None = None,
     inverse: Literal["inverse", "pseudoinverse"] = "inverse",
     max_iter: int = 500,
     rtol: float = 1e-4,
 ) -> BLSResult:
     """Perform bilinear least squares factorization.
 
-    This function approximates the observed data matrix X as the product of two
-    lower-rank matrices, A and Y, by minimizing the Frobenius norm of the
-    difference between X and A @ Y.T. Regularization and sample weights can be
-    applied to improve the stability and accuracy of the factorization.
+    This function decomposes the observed data matrix \( X \) into the product
+    of two lower-rank matrices \( A \) and \( Y \), such that:
+
+        \[ X \approx A Y^T \]
+
+    where:
+        - \( A \) is the coefficient matrix mapping latent variables to the
+            observed data.
+        - \( Y \) is the matrix of latent variables.
+
+    The objective is to find \( A \) and \( Y \) that minimize the Frobenius
+    norm of the reconstruction error:
+
+        \[ \| X - A Y^T \|_F \]
+
+    Regularization and sample weights can be applied to enhance the stability
+    and accuracy of the factorization process.  Additional constraints on
+    the structure of the coefficient matrix can be enforced by providing
+    a callback function that projects an estimate for A onto the subspace
+    of allowed matrices.
 
     Note:
         - N: Number of samples (rows in the observed data matrix X).
@@ -163,6 +195,9 @@ def bilinear_least_squares(
             scaled.  Defaults to 1e4.
         weights (Array, optional): Optional sample weights of shape (N, F). The
             weights do not need to be normalized. Defaults to None.
+        coefficient_constraint (Callable[[Array], Array], optional): Optional
+            callback function used to apply constraints to the coefficient
+            matrix.
         max_iter (int, optional): Maximum number of iterations for the
             alternating least squares algorithm. Defaults to 500.
         rtol (float, optional): Tolerance for the stopping condition. The
@@ -209,6 +244,15 @@ def bilinear_least_squares(
             A[n, :], c = ridge_regression(Y, X[n, :], alpha, weights=w, inverse=inverse)
             mean_condition_number += c / N
 
+        if coefficient_constraint:
+            A = coefficient_constraint(A)
+            if A.shape != (N, R):
+                raise ValueError(
+                    "The coefficient constraint function modified the shape of "
+                    "the constraint matrix. "
+                    f"Expected shape: {(N, R)}, but got: {A.shape}."
+                )
+
         residual_error = float(np.linalg.norm(X - A @ Y.T, "fro"))
         delta_error = (
             abs(residual_error - residual_error_old) / residual_error_old
@@ -226,3 +270,37 @@ def bilinear_least_squares(
         converged = False
 
     return BLSResult(A, Y, n_iter, residual_error, delta_error, alpha, converged)
+
+
+def causality_constraint(A: Array) -> Array:
+    """Enforce a causality constraint on the coefficient matrix A.
+
+    This function modifies the input matrix A by setting elements to zero where
+    the row index exceeds the column index, i.e., A[i, j] = 0 for all i > j.
+    This enforces a lower triangular structure, ensuring that each latent
+    variable at time step j influences only the observed variables at the same
+    or subsequent time steps, thereby maintaining a causal relationship.
+
+    Args:
+        A (Array): The coefficient matrix of shape (N, R), where N is the
+            number of observations and R is the number of latent variables.
+
+    Returns:
+        Array: The modified coefficient matrix with the causality constraint
+            applied.
+
+    Example:
+        >>> A = np.array([[1, 2, 3],
+                          [4, 5, 6],
+                          [7, 8, 9]])
+        >>> causality_constraint(A)
+        array([[1, 0, 0],
+               [4, 5, 0],
+               [7, 8, 9]])
+    """
+    N, R = A.shape
+    for i in range(N):
+        for j in range(R):
+            if i > j:
+                A[i, j] = 0
+    return A

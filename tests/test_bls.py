@@ -127,7 +127,7 @@ def test_invalid_rank():
 def test_invalid_weights_length():
     """Test handling of invalid weights length."""
     X = np.random.rand(5, 5)
-    weights = np.random.rand(4, 5)  # Incorrect length
+    weights = np.random.rand(4, 5)  # Incorrect length 
     with pytest.raises(
         ValueError, match="Weights must have the same shape as X."
     ):
@@ -165,3 +165,21 @@ def test_alpha_threshold():
 
     # Alpha should not be rescaled because the system is ill-conditioned
     assert result.alpha == 0.1
+
+
+def test_reconstruction():
+    t = np.arange(11)
+    y = 20 * np.array(t * np.exp(-t)).reshape((-1, 1))
+
+    A_real = np.array([
+        [0.95], 
+        [3],
+        [50],
+        [0.5],
+        [22]
+    ])
+
+    x_ideal = A_real @ y.T
+    x = x_ideal # np.random.poisson(x_ideal)
+    result = bilinear_least_squares(x, rank=1)
+    print(result)
